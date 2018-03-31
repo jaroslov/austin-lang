@@ -1,4 +1,4 @@
-//usr/bin/clang -DATXLANG_TEST "$0" -o atx && exec ./atx "$@"
+//usr/bin/clang -std=c11 -DATXLANG_TEST -g "$0" -o atx && exec ./atx "$@"
 #ifndef ATXLANG_H
 #define ATXLANG_H
 
@@ -279,7 +279,7 @@ int atxlangFreeCompiler(ATXLangCompiler* atx)
     return fres;
 }
 
-typedef enum ATXLangLexemType
+typedef enum ATXLexemdType
 {
     ATXTY_UNKNOWN,
     ATXTY_IDENTIFIER    = 0x1000,
@@ -298,19 +298,19 @@ typedef enum ATXLangLexemType
     ATXTY_CONTINUE,
 
     ATXTY_OPERATOR_FLAG  = 0x1000000, // All operators are 3 chars or less; directly encode them.
-} ATXLangLexemType;
+} ATXLexemdType;
 
-typedef struct ATXLangLexeme
+typedef struct ATXLexeme
 {
-    ATXLangLexemType  type;
+    ATXLexemdType   type;
     int             line;
     char           *lineBegin;
     char           *begin;
     char           *cur;
     char           *end;
-} ATXLangLexeme;
+} ATXLexeme;
 
-ATXLangLexeme* atxlangLexNext(ATXLangLexeme* lex)
+ATXLexeme* atxlangLexNext(ATXLexeme* lex)
 {
     if (!lex)
     {
@@ -408,21 +408,93 @@ ATXLangLexeme* atxlangLexNext(ATXLangLexeme* lex)
     switch (lex->cur[0])
     {
     case 'b'    : // break
+        if (((lex->end - lex->cur) >= 5)    &&
+            (lex->cur[1] == 'r') && (lex->cur[2] == 'e') && (lex->cur[3] == 'a') && (lex->cur[4] == 'k'))
+        {
+            lex->type   = ATXTY_DO;
+            lex->cur    += 5;
+            return lex;
+        }
+        break;
     case 'c'    : // case, continue
+        if (((lex->end - lex->cur) >= 4)    &&
+            (lex->cur[1] == 'a') && (lex->cur[2] == 's') && (lex->cur[3] == 'e'))
+        {
+            lex->type   = ATXTY_CASE;
+            lex->cur    += 4;
+            return lex;
+        }
+        if (((lex->end - lex->cur) >= 8)    &&
+            (lex->cur[1] == 'o') && (lex->cur[2] == 'n') && (lex->cur[3] == 't') && (lex->cur[4] == 'i') && (lex->cur[5] == 'n') && (lex->cur[6] == 'u') && (lex->cur[7] == 'e'))
+        {
+            lex->type   = ATXTY_CONTINUE;
+            lex->cur    += 8;
+            return lex;
+        }
+        break;
     case 'd'    : // do
+        if (((lex->end - lex->cur) >= 2)    &&
+            (lex->cur[1] == 'o'))
+        {
+            lex->type   = ATXTY_DO;
+            lex->cur    += 2;
+            return lex;
+        }
     case 'e'    : // else
+        if (((lex->end - lex->cur) >= 4)    &&
+            (lex->cur[1] == 'l') && (lex->cur[2] == 's') && (lex->cur[3] == 'e'))
+        {
+            lex->type   = ATXTY_ELSE;
+            lex->cur    += 4;
+            return lex;
+        }
     case 'f'    : // for
+        if (((lex->end - lex->cur) >= 3)    &&
+            (lex->cur[1] == 'o') && (lex->cur[2] == 'r'))
+        {
+            lex->type   = ATXTY_FOR;
+            lex->cur    += 3;
+            return lex;
+        }
     case 'i'    : // if
+        if (((lex->end - lex->cur) >= 2)    &&
+            (lex->cur[1] == 'f'))
+        {
+            lex->type   = ATXTY_IF;
+            lex->cur    += 4;
+            return lex;
+        }
     case 's'    : // switch
+        if (((lex->end - lex->cur) >= 6)    &&
+            (lex->cur[1] == 'w') && (lex->cur[2] == 'i') && (lex->cur[3] == 't') && (lex->cur[4] == 'c') && (lex->cur[5] == 'h'))
+        {
+            lex->type   = ATXTY_SWITCH;
+            lex->cur    += 6;
+            return lex;
+        }
     case 't'    : // then
+        if (((lex->end - lex->cur) >= 4)    &&
+            (lex->cur[1] == 'h') && (lex->cur[2] == 'e') && (lex->cur[3] == 'n'))
+        {
+            lex->type   = ATXTY_THEN;
+            lex->cur    += 4;
+            return lex;
+        }
     case 'w'    : // while
+        if (((lex->end - lex->cur) >= 5)    &&
+            (lex->cur[1] == 'h') && (lex->cur[2] == 'i') && (lex->cur[3] == 'l') && (lex->cur[4] == 'e'))
+        {
+            lex->type   = ATXTY_WHILE;
+            lex->cur    += 5;
+            return lex;
+        }
     default     : break;
     }
 
     if (lex->cur[0] == '$')
     {
         lex->type   = ATXTY_SYMBOL;
-        ++lex->cur[0];
+        ++lex->cur;
         if (lex->cur >= lex->end)
         {
             return 0;
@@ -457,7 +529,7 @@ ATXLangLexeme* atxlangLexNext(ATXLangLexeme* lex)
         return lex;
     }
 
-    return lex;
+    return 0;
 }
 
 ATXLangModule* atxlangCompile(ATXLangCompiler* atx, char* begin, char* end)
@@ -481,6 +553,26 @@ ATXLangModule* atxlangCompile(ATXLangCompiler* atx, char* begin, char* end)
 
     ATXMod* module      = (ATXMod*)atxlang_calloc(atxc->ATXH, sizeof(ATXMod));
     module->ATXH        = atxc->ATXH;
+
+    //ATXLexeme lex       =
+    //{
+    //    .type           = ATXTY_UNKNOWN,
+    //    .line           = 1,
+    //    .lineBegin      = begin,
+    //    .begin          = begin,
+    //    .cur            = begin,
+    //    .end            = end,
+    //};
+    //ATXLexeme* l        = 0;
+    //while ((l = atxlangLexNext(&lex)))
+    //{
+    //    fprintf(stdout,
+    //        "LEX(%d)%s\n%s",
+    //        (int)lex.type,
+    //        l ? "" : "!",
+    //        "");
+    //    lex.begin       = lex.cur;
+    //}
 
     return (ATXLangModule*)module;
 }
