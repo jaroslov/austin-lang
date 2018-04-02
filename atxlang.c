@@ -300,6 +300,10 @@ typedef enum ATXLexemdType
     ATXTY_OPERATOR_FLAG  = 0x1000000, // All operators are 3 chars or less; directly encode them.
 } ATXLexemdType;
 
+#define ATXTY_MK_OP1(O) (ATXTY_OPERATOR_FLAG | ((O) & 0xFF))
+#define ATXTY_MK_OP2(OH, OL) (ATXTY_OPERATOR_FLAG | (((OH) & 0xFF) << 8) | ((OL) & 0xFF))
+#define ATXTY_MK_OP3(OH, OL, OLB) (ATXTY_OPERATOR_FLAG | (((OH) & 0xFF) << 16) | (((OL) & 0xFF) << 8) | ((OB) & 0xFF))
+
 typedef struct ATXLexeme
 {
     ATXLexemdType   type;
@@ -391,6 +395,8 @@ ATXLexeme* atxlangLexNext(ATXLexeme* lex)
     case '='    :
     case '&'    :
     case '|'    :
+    case '<'    :
+    case '>'    :
         lex->type   = ATXTY_OPERATOR_FLAG | (int)lex->cur[0];
         ++lex->cur;
         if (lex->cur >= lex->end)
@@ -532,6 +538,115 @@ ATXLexeme* atxlangLexNext(ATXLexeme* lex)
     return 0;
 }
 
+char* atxlangRecognizeTopForm(char* begin, char* end)
+{
+    //      X ::= <identfier> PARAMS? TYPE? AEXPR?
+    // PARAMS ::= `(` PLIST `)`
+    //   TYPE ::= `:` EXPR
+    //  AEXPR ::= `=` EXPR
+    //  PLIST ::= X `,` PLIST
+    //         |  <null>
+    //   EXPR ::= ...
+
+    enum
+    {
+        UNK, X, PARAMS, PLIST, TYPE, AEXPR, EXPR,
+    };
+    uint64_t Stack[16]  = { };
+    int StackPos        = 0;
+    Stack[StackPos / 16]    = (X & 0xF) << (StackPos % 16);
+
+    ATXLexeme lex       =
+    {
+        .type           = ATXTY_UNKNOWN,
+        .line           = 1,
+        .lineBegin      = begin,
+        .begin          = begin,
+        .cur            = begin,
+        .end            = end,
+    };
+    ATXLexeme* l        = 0;
+    while ((l = atxlangLexNext(&lex)))
+    {
+        //fprintf(stdout,
+        //    "LEX(%d)%s\n%s",
+        //    (int)lex.type,
+        //    l ? "" : "!",
+        //    "");
+        //switch (lex.type)
+        //{
+        //case ATXTY_UNKNOWN              : return 0; /* ERROR */ break;
+        //case ATXTY_IDENTIFIER           :
+        //    switch (State)
+        //    {
+        //    case UNK                    : State = X; break;
+        //    case PARAMS                 : State = X; break;
+        //    default                     : return 0; /* ERROR */ break;
+        //    }
+        //    break;
+        //case ATXTY_NUMBER               : break;
+        //case ATXTY_SYMBOL               : break;
+        //case ATXTY_DO                   : break;
+        //case ATXTY_WHILE                : break;
+        //case ATXTY_FOR                  : break;
+        //case ATXTY_CASE                 : break;
+        //case ATXTY_IF                   : break;
+        //case ATXTY_THEN                 : break;
+        //case ATXTY_ELSE                 : break;
+        //case ATXTY_SWITCH               : break;
+        //case ATXTY_BREAK                : break;
+        //case ATXTY_CONTINUE             : break;
+        //case ATXTY_MK_OP1('(')          :
+        //    switch (State)
+        //    {
+        //    case X                      : State = PARAMS; break;
+        //    default                     : return 0; /* ERROR */ break;
+        //    }
+        //    break;
+        //case ATXTY_MK_OP1(')')          :
+        //    switch (State)
+        //    {
+        //    case PARAMS                 : State = X; break;
+        //    default                     : return 0; /* ERROR */ break;
+        //    }
+        //    break;
+        //case ATXTY_MK_OP1('[')          : break;
+        //case ATXTY_MK_OP1(']')          : break;
+        //case ATXTY_MK_OP1('{')          : break;
+        //case ATXTY_MK_OP1('}')          : break;
+        //case ATXTY_MK_OP1(':')          : break;
+        //case ATXTY_MK_OP1(',')          : break;
+        //case ATXTY_MK_OP1(';')          : break;
+        //case ATXTY_MK_OP1('+')          : break;
+        //case ATXTY_MK_OP1('-')          : break;
+        //case ATXTY_MK_OP1('*')          : break;
+        //case ATXTY_MK_OP1('/')          : break;
+        //case ATXTY_MK_OP1('^')          : break;
+        //case ATXTY_MK_OP1('~')          : break;
+        //case ATXTY_MK_OP1('!')          : break;
+        //case ATXTY_MK_OP2('!', '=')     : break;
+        //case ATXTY_MK_OP1('=')          : break;
+        //case ATXTY_MK_OP1('&')          : break;
+        //case ATXTY_MK_OP1('|')          : break;
+        //case ATXTY_MK_OP2('=','=')      : break;
+        //case ATXTY_MK_OP2('&','&')      : break;
+        //case ATXTY_MK_OP2('|','|')      : break;
+        //case ATXTY_MK_OP2('<','<')      : break;
+        //case ATXTY_MK_OP2('>','>')      : break;
+        //}
+        lex.begin       = lex.cur;
+    }
+}
+
+char* atxlangParse(char* begin, char* end)
+{
+    char* cur   = begin;
+    while ((cur = atxlangParseTopForm(cur, end)))
+    {
+    }
+    return 0;
+}
+
 ATXLangModule* atxlangCompile(ATXLangCompiler* atx, char* begin, char* end)
 {
     if (!atx)
@@ -553,26 +668,6 @@ ATXLangModule* atxlangCompile(ATXLangCompiler* atx, char* begin, char* end)
 
     ATXMod* module      = (ATXMod*)atxlang_calloc(atxc->ATXH, sizeof(ATXMod));
     module->ATXH        = atxc->ATXH;
-
-    //ATXLexeme lex       =
-    //{
-    //    .type           = ATXTY_UNKNOWN,
-    //    .line           = 1,
-    //    .lineBegin      = begin,
-    //    .begin          = begin,
-    //    .cur            = begin,
-    //    .end            = end,
-    //};
-    //ATXLexeme* l        = 0;
-    //while ((l = atxlangLexNext(&lex)))
-    //{
-    //    fprintf(stdout,
-    //        "LEX(%d)%s\n%s",
-    //        (int)lex.type,
-    //        l ? "" : "!",
-    //        "");
-    //    lex.begin       = lex.cur;
-    //}
 
     return (ATXLangModule*)module;
 }
