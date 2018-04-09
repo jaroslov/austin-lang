@@ -87,6 +87,14 @@ int atxlang_free(void* handle, void* p, unsigned long long bytes);
 long atxlang_strncmp(char* left, char* right, unsigned long length);
 #endif//ATXLANG_STDLIB
 
+#ifndef ATX_DBG_LOG
+#define ATX_DBG_LOG(...) fprintf(ATXLOGOUT, __VA_ARGS__)
+#endif//ATX_DBG_LOG
+
+#ifndef ATXLOGOUT
+#define ATXLOGOUT stdout
+#endif//ATXLOGOUT
+
 ////////////////////// ATXLANG STD LIB //////////////////////
 int atxlangPrint(ATXLangClosure*);
 
@@ -103,6 +111,7 @@ int atxlangPrintRawItem(ATXLangRaw*);
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int main(int argc, char *argv[])
 {
@@ -114,18 +123,25 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    char program[]              = "print($HELLO_WORLD)";
-    ATXLangModule* atxm         = atxlangCompile(atxc, &program[0], &program[0] + sizeof(program));
-    if (!atxm)
+    char *programs[]            =
+        {
+            "print($HELLO_WORLD)",
+            "print($HELLO_WORLD, $GOODBYE_CRUEL_WORLD)",
+        };
+    for (int PP = 0; PP < sizeof(programs)/sizeof(programs[0]); ++PP)
     {
-        fprintf(stdout, ">>> Sorry, failed to make the module.%s", "\n");
-        return 1;
-    }
+        ATXLangModule* atxm     = atxlangCompile(atxc, &programs[PP][0], &programs[PP][0] + strlen(programs[PP]));
+        if (!atxm)
+        {
+            fprintf(stdout, ">>> Sorry, failed to make the module.%s", "\n");
+            return 1;
+        }
 
-    if (!atxlangFreeModule(atxm))
-    {
-        fprintf(stdout, ">>> Sorry, failed to free the module.%s", "\n");
-        return 1;
+        if (!atxlangFreeModule(atxm))
+        {
+            fprintf(stdout, ">>> Sorry, failed to free the module.%s", "\n");
+            return 1;
+        }
     }
 
     if (!atxlangFreeCompiler(atxc))
@@ -286,7 +302,7 @@ typedef enum ATXLexemdType
     ATXTY_NUMBER,
     ATXTY_SYMBOL        = 0x2000,
 
-    ATXTY_DO            = 0x2000,
+    ATXTY_DO            = 0x4000,
     ATXTY_WHILE,
     ATXTY_FOR,
     ATXTY_CASE,
@@ -538,7 +554,65 @@ ATXLexeme* atxlangLexNext(ATXLexeme* lex)
     return 0;
 }
 
-char* atxlangRecognizeTopForm(char* begin, char* end)
+typedef enum ATXParseState
+{
+    ATX_PS_UNK,
+    ATX_PS_X,
+    ATX_PS_PARAMS,
+    ATX_PS_PARAMS_OR_NONE,
+    ATX_PS_PLIST,
+    ATX_PS_TYPE,
+    ATX_PS_AEXPR,
+    ATX_PS_EXPR,
+    ATX_PS_MAX,
+} ATXParseState;
+
+typedef struct ATXParseContext
+{
+    char*           StackBegin;
+    char*           StackEnd;
+    char*           StackPos;
+} ATXParseContext;
+
+int atxlangPushParseState(ATXParseContext* pctx, ATXParseState state)
+{
+    if ((pctx->StackPos+1) >= pctx->StackEnd)
+    {
+        return 0;
+    }
+
+    *pctx->StackPos     = state;
+    ++pctx->StackPos;
+
+    return 1;
+}
+
+ATXParseState atxlangPeekParseState(ATXParseContext* pctx)
+{
+    if ((pctx->StackPos-1) < pctx->StackBegin)
+    {
+        return ATX_PS_UNK;
+    }
+
+    ATXParseState S = (ATXParseState)*(pctx->StackPos-1);
+
+    return S;
+}
+
+ATXParseState atxlangPopParseState(ATXParseContext* pctx)
+{
+    if ((pctx->StackPos-1) < pctx->StackBegin)
+    {
+        return ATX_PS_UNK;
+    }
+
+    ATXParseState S = (ATXParseState)*pctx->StackPos;
+    --pctx->StackPos;
+
+    return S;
+}
+
+char* atxlangRecognizeTopForm(ATXParseContext* pctx, char* begin, char* end)
 {
     //      X ::= <identfier> PARAMS? TYPE? AEXPR?
     // PARAMS ::= `(` PLIST `)`
@@ -547,15 +621,6 @@ char* atxlangRecognizeTopForm(char* begin, char* end)
     //  PLIST ::= X `,` PLIST
     //         |  <null>
     //   EXPR ::= ...
-
-    enum
-    {
-        UNK, X, PARAMS, PLIST, TYPE, AEXPR, EXPR,
-    };
-    uint64_t Stack[16]  = { };
-    int StackPos        = 0;
-    Stack[StackPos / 16]    = (X & 0xF) << (StackPos % 16);
-
     ATXLexeme lex       =
     {
         .type           = ATXTY_UNKNOWN,
@@ -568,80 +633,93 @@ char* atxlangRecognizeTopForm(char* begin, char* end)
     ATXLexeme* l        = 0;
     while ((l = atxlangLexNext(&lex)))
     {
-        //fprintf(stdout,
-        //    "LEX(%d)%s\n%s",
-        //    (int)lex.type,
-        //    l ? "" : "!",
-        //    "");
-        //switch (lex.type)
-        //{
-        //case ATXTY_UNKNOWN              : return 0; /* ERROR */ break;
-        //case ATXTY_IDENTIFIER           :
-        //    switch (State)
-        //    {
-        //    case UNK                    : State = X; break;
-        //    case PARAMS                 : State = X; break;
-        //    default                     : return 0; /* ERROR */ break;
-        //    }
-        //    break;
-        //case ATXTY_NUMBER               : break;
-        //case ATXTY_SYMBOL               : break;
-        //case ATXTY_DO                   : break;
-        //case ATXTY_WHILE                : break;
-        //case ATXTY_FOR                  : break;
-        //case ATXTY_CASE                 : break;
-        //case ATXTY_IF                   : break;
-        //case ATXTY_THEN                 : break;
-        //case ATXTY_ELSE                 : break;
-        //case ATXTY_SWITCH               : break;
-        //case ATXTY_BREAK                : break;
-        //case ATXTY_CONTINUE             : break;
-        //case ATXTY_MK_OP1('(')          :
-        //    switch (State)
-        //    {
-        //    case X                      : State = PARAMS; break;
-        //    default                     : return 0; /* ERROR */ break;
-        //    }
-        //    break;
-        //case ATXTY_MK_OP1(')')          :
-        //    switch (State)
-        //    {
-        //    case PARAMS                 : State = X; break;
-        //    default                     : return 0; /* ERROR */ break;
-        //    }
-        //    break;
-        //case ATXTY_MK_OP1('[')          : break;
-        //case ATXTY_MK_OP1(']')          : break;
-        //case ATXTY_MK_OP1('{')          : break;
-        //case ATXTY_MK_OP1('}')          : break;
-        //case ATXTY_MK_OP1(':')          : break;
-        //case ATXTY_MK_OP1(',')          : break;
-        //case ATXTY_MK_OP1(';')          : break;
-        //case ATXTY_MK_OP1('+')          : break;
-        //case ATXTY_MK_OP1('-')          : break;
-        //case ATXTY_MK_OP1('*')          : break;
-        //case ATXTY_MK_OP1('/')          : break;
-        //case ATXTY_MK_OP1('^')          : break;
-        //case ATXTY_MK_OP1('~')          : break;
-        //case ATXTY_MK_OP1('!')          : break;
-        //case ATXTY_MK_OP2('!', '=')     : break;
-        //case ATXTY_MK_OP1('=')          : break;
-        //case ATXTY_MK_OP1('&')          : break;
-        //case ATXTY_MK_OP1('|')          : break;
-        //case ATXTY_MK_OP2('=','=')      : break;
-        //case ATXTY_MK_OP2('&','&')      : break;
-        //case ATXTY_MK_OP2('|','|')      : break;
-        //case ATXTY_MK_OP2('<','<')      : break;
-        //case ATXTY_MK_OP2('>','>')      : break;
-        //}
+        fprintf(stdout,
+            "LEX(%d)%s '%.*s'\n%s",
+            (int)lex.type,
+            l ? "" : "!",
+            (int)(lex.cur - lex.begin), lex.begin,
+            "");
+        switch (lex.type)
+        {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch"
+        case ATXTY_UNKNOWN              : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_IDENTIFIER           :
+            switch (atxlangPeekParseState(pctx))
+            {
+            case ATX_PS_UNK             : atxlangPushParseState(pctx, ATX_PS_X);        break;
+            case ATX_PS_PARAMS_OR_NONE  : atxlangPushParseState(pctx, ATX_PS_PARAMS);   break;
+            default                     : ATX_DBG_LOG("%d: Expected <init> or PARAMS-form.\n%s", __LINE__, ""); return 0; break;
+            }
+            break;
+        case ATXTY_NUMBER               : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_SYMBOL               : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_DO                   : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_WHILE                : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_FOR                  : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_CASE                 : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_IF                   : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_THEN                 : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_ELSE                 : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_SWITCH               : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_BREAK                : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_CONTINUE             : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_OPERATOR_FLAG        : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('(')          :
+            switch (atxlangPeekParseState(pctx))
+            {
+            case ATX_PS_X               : atxlangPushParseState(pctx, ATX_PS_PARAMS_OR_NONE); break;
+            default                     : ATX_DBG_LOG("%d: Expected X-form.\n%s", __LINE__, ""); return 0; break;
+            }
+            break;
+        case ATXTY_MK_OP1(')')          :
+            switch (atxlangPeekParseState(pctx))
+            {
+            case ATX_PS_PARAMS          :
+            case ATX_PS_PARAMS_OR_NONE  : atxlangPushParseState(pctx, ATX_PS_X); break;
+            default                     : ATX_DBG_LOG("%d: Expected PARAMS-form.\n%s", __LINE__, ""); return 0; break;
+            }
+            break;
+        case ATXTY_MK_OP1('[')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1(']')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('{')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('}')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1(':')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1(',')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1(';')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('+')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('-')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('*')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('/')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('^')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('~')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('!')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP2('!', '=')     : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('=')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('&')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP1('|')          : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP2('=','=')      : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP2('&','&')      : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP2('|','|')      : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP2('<','<')      : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+        case ATXTY_MK_OP2('>','>')      : ATX_DBG_LOG("%d: No form expected.\n%s", __LINE__, ""); return 0; break;
+#pragma clang diagnostic pop
+        }
         lex.begin       = lex.cur;
     }
+
+    return 0;
 }
 
 char* atxlangParse(char* begin, char* end)
 {
-    char* cur   = begin;
-    while ((cur = atxlangParseTopForm(cur, end)))
+    char* cur               = begin;
+    char Stack[1024]        = { };
+    ATXParseContext pctx    = { };
+    pctx.StackBegin         = &Stack[0];
+    pctx.StackPos           = pctx.StackBegin;
+    pctx.StackEnd           = pctx.StackBegin + sizeof(Stack);
+    while ((cur = atxlangRecognizeTopForm(&pctx, cur, end)))
     {
     }
     return 0;
@@ -668,6 +746,8 @@ ATXLangModule* atxlangCompile(ATXLangCompiler* atx, char* begin, char* end)
 
     ATXMod* module      = (ATXMod*)atxlang_calloc(atxc->ATXH, sizeof(ATXMod));
     module->ATXH        = atxc->ATXH;
+
+    atxlangParse(begin, end);
 
     return (ATXLangModule*)module;
 }
