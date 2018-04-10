@@ -314,7 +314,7 @@ typedef enum ATXLexemeType
     ATXTY_CONTINUE,
 
     ATXTY_OPERATOR_FLAG  = 0x1000000, // All operators are 3 chars or less; directly encode them.
-} ATXLexemdType;
+} ATXLexemeType;
 
 #define ATXTY_MK_OP1(O) (ATXTY_OPERATOR_FLAG | ((O) & 0xFF))
 #define ATXTY_MK_OP2(OH, OL) (ATXTY_OPERATOR_FLAG | (((OH) & 0xFF) << 8) | ((OL) & 0xFF))
@@ -322,7 +322,7 @@ typedef enum ATXLexemeType
 
 typedef struct ATXLexeme
 {
-    ATXLexemdType   type;
+    ATXLexemeType   type;
     int             line;
     char           *lineBegin;
     char           *begin;
@@ -647,6 +647,7 @@ char* atxlangRecognizeTopForm(ATXParseContext* pctx, char* begin, char* end)
         .cur            = begin,
         .end            = end,
     };
+    ATXLexemeType Op    = ATXTY_MK_OP1('\0');
     ATXLexeme* l        = 0;
     atxlangPushParseState(pctx, ATXPS_START);
     while (!atxlParseStateEmpty(pctx))
@@ -749,18 +750,39 @@ char* atxlangRecognizeTopForm(ATXParseContext* pctx, char* begin, char* end)
         case ATXPS_IDENTIFIER   :
             ATX_DBG_LOG("IDENTIFIER%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
             atxlangPopParseState(pctx);
+            l                   = atxlangLexNext(&lex);
+            if (!l)
+            {
+                return 0;
+            }
+            if (l->type != ATXTY_IDENTIFIER)
+            {
+                return 0;
+            }
+            lex.begin           = l->cur;
             break;
         case ATXPS_COMMA        :
-            ATX_DBG_LOG("COMMA%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
-            atxlangPopParseState(pctx);
-            break;
+            Op                  = ATXTY_MK_OP1(',');
+            goto PARSE_OPERATOR;
         case ATXPS_LPAREN       :
-            ATX_DBG_LOG("LPAREN%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
-            atxlangPopParseState(pctx);
-            break;
+            Op                  = ATXTY_MK_OP1('(');
+            goto PARSE_OPERATOR;
         case ATXPS_RPAREN       :
-            ATX_DBG_LOG("RPAREN%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+            Op                  = ATXTY_MK_OP1(')');
+            goto PARSE_OPERATOR;
+PARSE_OPERATOR                  :
+            ATX_DBG_LOG("OP(%c)%s%s\n%s", (char)Op, !Marked ? "" : "!", Optional ? "?" : "", "");
             atxlangPopParseState(pctx);
+            l                   = atxlangLexNext(&lex);
+            if (!l)
+            {
+                return 0;
+            }
+            if (l->type != Op)
+            {
+                return 0;
+            }
+            lex.begin           = l->cur;
             break;
 
         case ATXPS_OPT          :
