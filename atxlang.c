@@ -568,6 +568,7 @@ typedef enum ATXParseState
     ATXPS_PARAM,
 
     ATXPS_IDENTIFIER,
+    ATXPS_SYMBOL,
     ATXPS_COMMA,
     ATXPS_LPAREN,
     ATXPS_RPAREN,
@@ -724,30 +725,50 @@ char* atxlangRecognizeTopForm(ATXParseContext* pctx, char* begin, char* end)
         case ATXPS_PARAMS       :
             ATX_DBG_LOG("PARAMS%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
             atxlangPopParseState(pctx);
-            //if (!Marked)
-            //{
-            //    atxlangMarkParseState(pctx);
-            //    atxlangPushParseState(pctx, ATXPS_PARAM);
-            //}
-            //else
-            //{
-            //    // Look for comma?
-            //    if (comma)
-            //    {
-            //        atxlangPushParseState(pctx, ATXPS_PARAM);
-            //    }
-            //    else
-            //    {
-            //        atxlangPopParseState(pctx);
-            //    }
-            //}
+            if (!Marked)
+            {
+                atxlangMarkParseState(pctx);
+                atxlangPushParseState(pctx, ATXPS_PARAM);
+            }
+            else
+            {
+                l               = atxlangLexNext(&lex);
+                if (!l)
+                {
+                    return 0;
+                }
+                if (l->type == ATXTY_MK_OP1(','))
+                {
+                    lex.begin   = l->cur;
+                    atxlangPushParseState(pctx, ATXPS_PARAM);
+                }
+                else
+                {
+                    atxlangPopParseState(pctx);
+                }
+            }
             break;
         case ATXPS_PARAM        :
             ATX_DBG_LOG("PARAM%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
             atxlangPopParseState(pctx);
+            if (!Marked)
+            {
+                atxlangMarkParseState(pctx);
+                atxlangPushParseState(pctx, ATXPS_SYMBOL);
+            }
+            else
+            {
+                atxlangPopParseState(pctx);
+            }
             break;
 
+        case ATXPS_SYMBOL       :
+            Op                  = ATXTY_SYMBOL | ATXTY_IDENTIFIER;
+            goto PARSE_SID;
         case ATXPS_IDENTIFIER   :
+            Op                  = ATXTY_IDENTIFIER;
+            goto PARSE_SID;
+PARSE_SID                       :
             ATX_DBG_LOG("IDENTIFIER%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
             atxlangPopParseState(pctx);
             l                   = atxlangLexNext(&lex);
@@ -755,7 +776,7 @@ char* atxlangRecognizeTopForm(ATXParseContext* pctx, char* begin, char* end)
             {
                 return 0;
             }
-            if (l->type != ATXTY_IDENTIFIER)
+            if (l->type != Op)
             {
                 return 0;
             }
