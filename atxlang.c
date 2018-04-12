@@ -579,6 +579,7 @@ typedef enum ATXParseState
 
 typedef struct ATXParseContext
 {
+    ATXLexeme   lex;
     uint16_t   *StackBegin;
     uint16_t   *StackEnd;
     uint16_t   *StackPos;
@@ -637,183 +638,194 @@ ATXParseState atxlangPopParseState(ATXParseContext* pctx)
     return (ATXParseState)*pctx->StackPos;
 }
 
-char* atxlangRecognizeTopForm(ATXParseContext* pctx, char* begin, char* end)
+int atxlangInitParser(ATXParseContext* pctx, uint16_t* bStack, uint16_t* eStack, char* begin, char* end)
 {
-    ATXLexeme lex       =
-    {
-        .type           = ATXTY_UNKNOWN,
-        .line           = 1,
-        .lineBegin      = begin,
-        .begin          = begin,
-        .cur            = begin,
-        .end            = end,
-    };
+    pctx->lex.type          = ATXTY_UNKNOWN;
+    pctx->lex.line          = 1;
+    pctx->lex.lineBegin     = begin;
+    pctx->lex.begin         = begin;
+    pctx->lex.cur           = begin;
+    pctx->lex.end           = end;
+
+    pctx->StackBegin        = bStack;
+    pctx->StackPos          = pctx->StackBegin;
+    pctx->StackEnd          = eStack;
+
+    return atxlangPushParseState(pctx, ATXPS_START);
+}
+
+int atxlangRecognize(ATXParseContext* pctx)
+{
     ATXLexemeType Op    = ATXTY_MK_OP1('\0');
     ATXLexeme* l        = 0;
-    atxlangPushParseState(pctx, ATXPS_START);
-    while (!atxlParseStateEmpty(pctx))
+
+    ATXParseState State = atxlangPeekParseState(pctx);
+    int Marked          = !!(State & ATXPS_MARK);
+    int Optional        = !!(State & ATXPS_OPT);
+    State               &= ~(ATXPS_MARK | ATXPS_OPT);
+    switch (State)
     {
-        ATXParseState State = atxlangPeekParseState(pctx);
-        int Marked          = !!(State & ATXPS_MARK);
-        int Optional        = !!(State & ATXPS_OPT);
-        State               &= ~(ATXPS_MARK | ATXPS_OPT);
-        switch (State)
+    case ATXPS_UNKNOWN      :
+        return 0; // ERROR
+    case ATXPS_START        :
+        ATX_DBG_LOG("START%s\n%s", !Marked ? "" : "!", "");
+        if (!Marked)
         {
-        case ATXPS_UNKNOWN      :
-            return 0; // ERROR
-        case ATXPS_START        :
-            ATX_DBG_LOG("START%s\n%s", !Marked ? "" : "!", "");
-            if (!Marked)
+            atxlangMarkParseState(pctx);
+            atxlangPushParseState(pctx, ATXPS_TOPFORM);
+        }
+        else
+        {
+            if (pctx->lex.cur < pctx->lex.end)
             {
-                atxlangMarkParseState(pctx);
                 atxlangPushParseState(pctx, ATXPS_TOPFORM);
             }
             else
             {
                 return 0;
             }
-            break;
-        case ATXPS_TOPFORM      :
-            ATX_DBG_LOG("TOPFORM%s\n%s", !Marked ? "" : "!", "");
-            if (!Marked)
-            {
-                atxlangMarkParseState(pctx);
-                atxlangPushParseState(pctx, ATXPS_OPT | ATXPS_DEFINING);
-                atxlangPushParseState(pctx, ATXPS_OPT | ATXPS_TYPING);
-                atxlangPushParseState(pctx, ATXPS_CHI);
-            }
-            else
-            {
-                atxlangPopParseState(pctx);
-            }
-            break;
-        case ATXPS_DEFINING     :
-            ATX_DBG_LOG("DEFINING%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+        }
+        break;
+    case ATXPS_TOPFORM      :
+        ATX_DBG_LOG("TOPFORM%s\n%s", !Marked ? "" : "!", "");
+        if (!Marked)
+        {
+            atxlangMarkParseState(pctx);
+            atxlangPushParseState(pctx, ATXPS_OPT | ATXPS_DEFINING);
+            atxlangPushParseState(pctx, ATXPS_OPT | ATXPS_TYPING);
+            atxlangPushParseState(pctx, ATXPS_CHI);
+        }
+        else
+        {
             atxlangPopParseState(pctx);
-            break;
-        case ATXPS_TYPING       :
-            ATX_DBG_LOG("TYPING%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+        }
+        break;
+    case ATXPS_DEFINING     :
+        ATX_DBG_LOG("DEFINING%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+        atxlangPopParseState(pctx);
+        break;
+    case ATXPS_TYPING       :
+        ATX_DBG_LOG("TYPING%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+        atxlangPopParseState(pctx);
+        break;
+    case ATXPS_CHI          :
+        ATX_DBG_LOG("CHI%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+        if (!Marked)
+        {
+            atxlangMarkParseState(pctx);
+            atxlangPushParseState(pctx, ATXPS_OPT | ATXPS_PARAM_TUPLE);
+            atxlangPushParseState(pctx, ATXPS_IDENTIFIER);
+        }
+        else
+        {
             atxlangPopParseState(pctx);
-            break;
-        case ATXPS_CHI          :
-            ATX_DBG_LOG("CHI%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
-            if (!Marked)
-            {
-                atxlangMarkParseState(pctx);
-                atxlangPushParseState(pctx, ATXPS_OPT | ATXPS_PARAM_TUPLE);
-                atxlangPushParseState(pctx, ATXPS_IDENTIFIER);
-            }
-            else
-            {
-                atxlangPopParseState(pctx);
-            }
-            break;
-        case ATXPS_PARAM_TUPLE  :
-            ATX_DBG_LOG("PARAM_TUPLE%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
-            if (!Marked)
-            {
-                atxlangMarkParseState(pctx);
-                atxlangPushParseState(pctx, ATXPS_RPAREN);
-                atxlangPushParseState(pctx, ATXPS_PARAMS);
-                atxlangPushParseState(pctx, ATXPS_LPAREN);
-            }
-            else
-            {
-                atxlangPopParseState(pctx);
-            }
-            break;
-        case ATXPS_PARAMS       :
-            ATX_DBG_LOG("PARAMS%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+        }
+        break;
+    case ATXPS_PARAM_TUPLE  :
+        ATX_DBG_LOG("PARAM_TUPLE%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+        if (!Marked)
+        {
+            atxlangMarkParseState(pctx);
+            atxlangPushParseState(pctx, ATXPS_RPAREN);
+            atxlangPushParseState(pctx, ATXPS_PARAMS);
+            atxlangPushParseState(pctx, ATXPS_LPAREN);
+        }
+        else
+        {
             atxlangPopParseState(pctx);
-            if (!Marked)
+        }
+        break;
+    case ATXPS_PARAMS       :
+        ATX_DBG_LOG("PARAMS%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+        atxlangPopParseState(pctx);
+        if (!Marked)
+        {
+            atxlangMarkParseState(pctx);
+            atxlangPushParseState(pctx, ATXPS_PARAM);
+        }
+        else
+        {
+            l               = atxlangLexNext(&pctx->lex);
+            if (!l)
             {
-                atxlangMarkParseState(pctx);
+                return 0;
+            }
+            if (l->type == ATXTY_MK_OP1(','))
+            {
+                pctx->lex.begin = l->cur;
                 atxlangPushParseState(pctx, ATXPS_PARAM);
             }
             else
             {
-                l               = atxlangLexNext(&lex);
-                if (!l)
-                {
-                    return 0;
-                }
-                if (l->type == ATXTY_MK_OP1(','))
-                {
-                    lex.begin   = l->cur;
-                    atxlangPushParseState(pctx, ATXPS_PARAM);
-                }
-                else
-                {
-                    atxlangPopParseState(pctx);
-                }
-            }
-            break;
-        case ATXPS_PARAM        :
-            ATX_DBG_LOG("PARAM%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
-            atxlangPopParseState(pctx);
-            if (!Marked)
-            {
-                atxlangMarkParseState(pctx);
-                atxlangPushParseState(pctx, ATXPS_SYMBOL);
-            }
-            else
-            {
                 atxlangPopParseState(pctx);
             }
-            break;
-
-        case ATXPS_SYMBOL       :
-            Op                  = ATXTY_SYMBOL | ATXTY_IDENTIFIER;
-            goto PARSE_SID;
-        case ATXPS_IDENTIFIER   :
-            Op                  = ATXTY_IDENTIFIER;
-            goto PARSE_SID;
-PARSE_SID                       :
-            ATX_DBG_LOG("IDENTIFIER%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
-            atxlangPopParseState(pctx);
-            l                   = atxlangLexNext(&lex);
-            if (!l)
-            {
-                return 0;
-            }
-            if (l->type != Op)
-            {
-                return 0;
-            }
-            lex.begin           = l->cur;
-            break;
-        case ATXPS_COMMA        :
-            Op                  = ATXTY_MK_OP1(',');
-            goto PARSE_OPERATOR;
-        case ATXPS_LPAREN       :
-            Op                  = ATXTY_MK_OP1('(');
-            goto PARSE_OPERATOR;
-        case ATXPS_RPAREN       :
-            Op                  = ATXTY_MK_OP1(')');
-            goto PARSE_OPERATOR;
-PARSE_OPERATOR                  :
-            ATX_DBG_LOG("OP(%c)%s%s\n%s", (char)Op, !Marked ? "" : "!", Optional ? "?" : "", "");
-            atxlangPopParseState(pctx);
-            l                   = atxlangLexNext(&lex);
-            if (!l)
-            {
-                return 0;
-            }
-            if (l->type != Op)
-            {
-                return 0;
-            }
-            lex.begin           = l->cur;
-            break;
-
-        case ATXPS_OPT          :
-            return 0; // ERROR.
-        case ATXPS_MARK         :
-            return 0; // ERROR.
         }
+        break;
+    case ATXPS_PARAM        :
+        ATX_DBG_LOG("PARAM%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+        atxlangPopParseState(pctx);
+        if (!Marked)
+        {
+            atxlangMarkParseState(pctx);
+            atxlangPushParseState(pctx, ATXPS_SYMBOL);
+        }
+        else
+        {
+            atxlangPopParseState(pctx);
+        }
+        break;
+
+    case ATXPS_SYMBOL       :
+        Op                  = ATXTY_SYMBOL | ATXTY_IDENTIFIER;
+        goto PARSE_SID;
+    case ATXPS_IDENTIFIER   :
+        Op                  = ATXTY_IDENTIFIER;
+        goto PARSE_SID;
+PARSE_SID                       :
+        ATX_DBG_LOG("IDENTIFIER%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
+        atxlangPopParseState(pctx);
+        l                   = atxlangLexNext(&pctx->lex);
+        if (!l)
+        {
+            return 0;
+        }
+        if (l->type != Op)
+        {
+            return 0;
+        }
+        pctx->lex.begin     = l->cur;
+        break;
+    case ATXPS_COMMA        :
+        Op                  = ATXTY_MK_OP1(',');
+        goto PARSE_OPERATOR;
+    case ATXPS_LPAREN       :
+        Op                  = ATXTY_MK_OP1('(');
+        goto PARSE_OPERATOR;
+    case ATXPS_RPAREN       :
+        Op                  = ATXTY_MK_OP1(')');
+        goto PARSE_OPERATOR;
+PARSE_OPERATOR                  :
+        ATX_DBG_LOG("OP(%c)%s%s\n%s", (char)Op, !Marked ? "" : "!", Optional ? "?" : "", "");
+        atxlangPopParseState(pctx);
+        l                   = atxlangLexNext(&pctx->lex);
+        if (!l)
+        {
+            return 0;
+        }
+        if (l->type != Op)
+        {
+            return 0;
+        }
+        pctx->lex.begin     = l->cur;
+        break;
+
+    case ATXPS_OPT          :
+        return 0; // ERROR.
+    case ATXPS_MARK         :
+        return 0; // ERROR.
     }
 
-    return 0;
+    return 1;
 }
 
 char* atxlangParse(char* begin, char* end)
@@ -821,10 +833,8 @@ char* atxlangParse(char* begin, char* end)
     char* cur               = begin;
     uint16_t Stack[1024]    = { };
     ATXParseContext pctx    = { };
-    pctx.StackBegin         = &Stack[0];
-    pctx.StackPos           = pctx.StackBegin;
-    pctx.StackEnd           = pctx.StackBegin + sizeof(Stack);
-    while ((cur = atxlangRecognizeTopForm(&pctx, cur, end)))
+    atxlangInitParser(&pctx, &Stack[0], &Stack[0] + sizeof(Stack) / sizeof(uint16_t), begin, end);
+    while (!atxlParseStateEmpty(&pctx) && atxlangRecognize(&pctx))
     {
     }
     return 0;
