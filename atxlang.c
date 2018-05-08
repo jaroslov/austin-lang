@@ -88,7 +88,7 @@ long atxlang_strncmp(char* left, char* right, unsigned long length);
 #endif//ATXLANG_STDLIB
 
 #ifndef ATX_DBG_LOG
-#define ATX_DBG_LOG(...) fprintf(ATXLOGOUT, __VA_ARGS__)
+#define ATX_DBG_LOG(PMSG, ...) fprintf(ATXLOGOUT, "%*s" PMSG, ((pctx->depth - (Marked ? 1 : 0)) * DEPTHSCALE), "", __VA_ARGS__)
 #endif//ATX_DBG_LOG
 
 #ifndef ATXLOGOUT
@@ -127,6 +127,7 @@ int main(int argc, char *argv[])
         {
             "print($HELLO_WORLD)",
             "print($HELLO_WORLD, $GOODBYE_CRUEL_WORLD)",
+            "square(x) : int = x * x"
         };
     for (int PP = 0; PP < sizeof(programs)/sizeof(programs[0]); ++PP)
     {
@@ -367,6 +368,8 @@ ATXLexeme* atxlangLexNext(ATXLexeme* lex)
         ++lex->cur;
     }
 
+    lex->begin  = lex->cur;
+
     if (lex->cur >= lex->end)
     {
         return lex;
@@ -580,6 +583,7 @@ typedef enum ATXParseState
 typedef struct ATXParseContext
 {
     ATXLexeme   lex;
+    int         depth;
     uint16_t   *StackBegin;
     uint16_t   *StackEnd;
     uint16_t   *StackPos;
@@ -656,6 +660,7 @@ int atxlangInitParser(ATXParseContext* pctx, uint16_t* bStack, uint16_t* eStack,
 
 int atxlangRecognize(ATXParseContext* pctx)
 {
+    enum { DEPTHSCALE   = 4 };
     ATXLexemeType Op    = ATXTY_MK_OP1('\0');
     ATXLexeme* l        = 0;
 
@@ -671,11 +676,13 @@ int atxlangRecognize(ATXParseContext* pctx)
         ATX_DBG_LOG("START%s\n%s", !Marked ? "" : "!", "");
         if (!Marked)
         {
+            ++pctx->depth;
             atxlangMarkParseState(pctx);
             atxlangPushParseState(pctx, ATXPS_TOPFORM);
         }
         else
         {
+            --pctx->depth;
             if (pctx->lex.cur < pctx->lex.end)
             {
                 atxlangPushParseState(pctx, ATXPS_TOPFORM);
@@ -690,6 +697,7 @@ int atxlangRecognize(ATXParseContext* pctx)
         ATX_DBG_LOG("TOPFORM%s\n%s", !Marked ? "" : "!", "");
         if (!Marked)
         {
+            ++pctx->depth;
             atxlangMarkParseState(pctx);
             atxlangPushParseState(pctx, ATXPS_OPT | ATXPS_DEFINING);
             atxlangPushParseState(pctx, ATXPS_OPT | ATXPS_TYPING);
@@ -697,6 +705,7 @@ int atxlangRecognize(ATXParseContext* pctx)
         }
         else
         {
+            --pctx->depth;
             atxlangPopParseState(pctx);
         }
         break;
@@ -712,12 +721,14 @@ int atxlangRecognize(ATXParseContext* pctx)
         ATX_DBG_LOG("CHI%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
         if (!Marked)
         {
+            ++pctx->depth;
             atxlangMarkParseState(pctx);
             atxlangPushParseState(pctx, ATXPS_OPT | ATXPS_PARAM_TUPLE);
             atxlangPushParseState(pctx, ATXPS_IDENTIFIER);
         }
         else
         {
+            --pctx->depth;
             atxlangPopParseState(pctx);
         }
         break;
@@ -725,6 +736,7 @@ int atxlangRecognize(ATXParseContext* pctx)
         ATX_DBG_LOG("PARAM_TUPLE%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
         if (!Marked)
         {
+            ++pctx->depth;
             atxlangMarkParseState(pctx);
             atxlangPushParseState(pctx, ATXPS_RPAREN);
             atxlangPushParseState(pctx, ATXPS_PARAMS);
@@ -732,19 +744,21 @@ int atxlangRecognize(ATXParseContext* pctx)
         }
         else
         {
+            --pctx->depth;
             atxlangPopParseState(pctx);
         }
         break;
     case ATXPS_PARAMS       :
         ATX_DBG_LOG("PARAMS%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
-        atxlangPopParseState(pctx);
         if (!Marked)
         {
+            ++pctx->depth;
             atxlangMarkParseState(pctx);
             atxlangPushParseState(pctx, ATXPS_PARAM);
         }
         else
         {
+            ATXLexeme L     = pctx->lex;
             l               = atxlangLexNext(&pctx->lex);
             if (!l)
             {
@@ -757,24 +771,26 @@ int atxlangRecognize(ATXParseContext* pctx)
             }
             else
             {
+                --pctx->depth;
+                pctx->lex   = L;
                 atxlangPopParseState(pctx);
             }
         }
         break;
     case ATXPS_PARAM        :
         ATX_DBG_LOG("PARAM%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
-        atxlangPopParseState(pctx);
         if (!Marked)
         {
+            ++pctx->depth;
             atxlangMarkParseState(pctx);
             atxlangPushParseState(pctx, ATXPS_SYMBOL);
         }
         else
         {
+            --pctx->depth;
             atxlangPopParseState(pctx);
         }
         break;
-
     case ATXPS_SYMBOL       :
         Op                  = ATXTY_SYMBOL | ATXTY_IDENTIFIER;
         goto PARSE_SID;
@@ -782,13 +798,16 @@ int atxlangRecognize(ATXParseContext* pctx)
         Op                  = ATXTY_IDENTIFIER;
         goto PARSE_SID;
 PARSE_SID                       :
-        ATX_DBG_LOG("IDENTIFIER%s%s\n%s", !Marked ? "" : "!", Optional ? "?" : "", "");
         atxlangPopParseState(pctx);
         l                   = atxlangLexNext(&pctx->lex);
         if (!l)
         {
             return 0;
         }
+        ATX_DBG_LOG("%s '%.*s'%s%s\n%s",
+            (Op & ATXTY_SYMBOL) ? "SYM" : "ID",
+            (int)(l->cur - l->begin), l->begin,
+            !Marked ? "" : "!", Optional ? "?" : "", "");
         if (l->type != Op)
         {
             return 0;
@@ -805,7 +824,7 @@ PARSE_SID                       :
         Op                  = ATXTY_MK_OP1(')');
         goto PARSE_OPERATOR;
 PARSE_OPERATOR                  :
-        ATX_DBG_LOG("OP(%c)%s%s\n%s", (char)Op, !Marked ? "" : "!", Optional ? "?" : "", "");
+        ATX_DBG_LOG("OP '%c'%s%s\n%s", (char)Op, !Marked ? "" : "!", Optional ? "?" : "", "");
         atxlangPopParseState(pctx);
         l                   = atxlangLexNext(&pctx->lex);
         if (!l)
